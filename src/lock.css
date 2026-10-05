@@ -1,0 +1,45 @@
+.app-lock-divider{height:1px;background:#edf0eb;margin:18px 0 15px}
+.app-lock-heading{display:flex;align-items:center;justify-content:space-between;color:#769075}
+.app-lock-heading b{font-size:12px;font-weight:600;color:#526056}
+.app-lock-heading p,.app-lock-disclaimer,.app-lock-explainer p{font-size:10px;line-height:1.6;color:#8e998f;margin:5px 0 0}
+.app-lock-settings{margin-top:10px}
+.app-lock-settings .setting-row{border:0;padding:8px 0}
+.status-badge-off{background:#f3f4f1;color:#899188}
+.status-badge-off i{background:#aab2a9}
+.app-lock-disclaimer{margin:3px 0 13px}
+.app-lock-form{border-top:1px solid #eff1ed;padding-top:13px}
+.app-lock-type-choice{display:flex;gap:7px}
+.app-lock-type-choice button{height:32px;padding:0 13px;border:1px solid #e5ebe3;border-radius:7px;background:white;color:#78847b;font-size:10px}
+.app-lock-type-choice button.selected{border-color:#bed0bd;background:#f2f6f0;color:#456b4f;font-weight:600}
+.app-lock-form .settings-field{margin-top:11px}
+.app-lock-actions{display:flex;align-items:center;gap:8px;margin-top:15px}
+.app-lock-actions .btn{height:33px;padding:0 12px;font-size:10px}
+.app-lock-pattern-field{display:grid;justify-items:center;gap:7px;margin-top:13px}
+.app-lock-pattern-field>span{font-size:10px;color:#708076}
+.app-lock-pattern{width:138px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:7px}
+.app-lock-pattern button{width:34px;height:34px;border:1px solid #dfe8dd;border-radius:50%;background:#f7f9f6;color:#527456;display:grid;place-items:center;font-size:10px;font-weight:600}
+.app-lock-pattern button:hover,.app-lock-pattern button.selected{background:#e4eee2;border-color:#83a181;color:#355b3e}
+.app-lock-clear{font-size:10px}
+.app-lock-explainer{padding-top:8px}
+.app-lock-screen{min-height:100vh;padding:24px;display:grid;place-items:center;background:#f4f6f1}
+.app-lock-card{width:min(410px,100%);padding:30px;background:white;border:1px solid #e6ebe4;border-radius:14px;box-shadow:0 16px 50px #3448380a;text-align:center}
+.app-lock-card>.brand{justify-content:center;margin-bottom:30px}
+.app-lock-icon{width:44px;height:44px;border-radius:50%;display:inline-grid;place-items:center;background:#eff4ee;color:#5c805f}
+.app-lock-card h1{font-family:var(--serif);font-weight:500;font-size:25px;margin:14px 0 6px;color:#2f3c33}
+.app-lock-card>p{font-size:11px;color:#89948b;margin:0 0 18px}
+.app-lock-card form{display:grid;gap:14px}
+.app-lock-pin{display:grid;gap:7px;text-align:left;font-size:10px;color:#708076}
+.app-lock-pin input{height:40px;border:1px solid #e3e9e1;border-radius:7px;padding:0 11px;font-size:15px;letter-spacing:5px;color:#435348}
+.app-lock-card .app-lock-pattern-field{margin:0 0 3px}
+.app-lock-card .app-lock-pattern{width:175px;gap:13px}
+.app-lock-card .app-lock-pattern button{width:43px;height:43px}
+.app-lock-card .btn-wide{height:39px}
+.app-lock-card .form-error{margin:0;font-size:10px}
+.app-lock-logout{border:0;background:transparent;color:#718174;font-size:10px;margin-top:18px;padding:7px}
+.app-lock-logout:hover{color:#385e44;text-decoration:underline}
+
+@media(max-width:480px){
+  .app-lock-screen{padding:16px}
+  .app-lock-card{padding:24px 19px}
+  .app-lock-heading p{max-width:260px}
+}

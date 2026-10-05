@@ -1,4 +1,7 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -24,6 +27,25 @@ class NoteUpdate(NoteCreate):
 
 class ProfileUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+
+class AppLockSetup(BaseModel):
+    lock_type: Literal["pin", "pattern"]
+    secret: str = Field(min_length=4, max_length=9)
+
+    @field_validator("secret")
+    @classmethod
+    def validate_lock_secret(cls, secret: str, info) -> str:
+        lock_type = info.data.get("lock_type")
+        if lock_type == "pin" and not re.fullmatch(r"\d{4,8}", secret):
+            raise ValueError("A PIN must contain 4 to 8 digits.")
+        if lock_type == "pattern" and (
+            not re.fullmatch(r"[0-8]{4,9}", secret)
+            or len(set(secret)) < 4
+            or len(set(secret)) != len(secret)
+        ):
+            raise ValueError("A pattern must connect at least 4 different dots.")
+        return secret
 
 
 class NoteResponse(BaseModel):

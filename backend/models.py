@@ -100,3 +100,22 @@ class User(Base):
     )
 
     notes: Mapped[list[Note]] = relationship(back_populates="user")
+
+
+class UserAppLock(Base):
+    __tablename__ = "user_app_locks"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        primary_key=True
+    )
+
+    lock_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False
+    )
+
+    hashed_secret: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )

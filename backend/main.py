@@ -17,8 +17,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 try:
     from .database import Base, engine, get_db
-    from .models import Note, User
+    from .models import Note, User, UserAppLock
     from .schemas import (
+        AppLockSetup,
         NoteCreate,
         NoteResponse,
         NoteUpdate,
@@ -27,8 +28,9 @@ try:
     )
 except ImportError:  # pragma: no cover - fallback for running files directly
     from database import Base, engine, get_db
-    from models import Note, User
+    from models import Note, User, UserAppLock
     from schemas import (
+        AppLockSetup,
         NoteCreate,
         NoteResponse,
         NoteUpdate,
@@ -208,6 +210,62 @@ def update_profile(
     current_user.name = profile.name.strip()
     db.commit()
     return {"name": current_user.name, "email": current_user.email}
+
+
+@app.get("/users/me/app-lock")
+def get_app_lock(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool | str | None]:
+    app_lock = db.get(UserAppLock, current_user.id)
+    return {
+        "enabled": app_lock is not None,
+        "lock_type": app_lock.lock_type if app_lock else None,
+    }
+
+
+@app.put("/users/me/app-lock")
+def set_app_lock(
+    setup: AppLockSetup,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool | str]:
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is None:
+        app_lock = UserAppLock(user_id=current_user.id)
+        db.add(app_lock)
+    app_lock.lock_type = setup.lock_type
+    app_lock.hashed_secret = password_hash.hash(setup.secret)
+    db.commit()
+    return {"enabled": True, "lock_type": app_lock.lock_type}
+
+
+@app.post("/users/me/app-lock/verify")
+def verify_app_lock(
+    attempt: AppLockSetup,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is None or app_lock.lock_type != attempt.lock_type:
+        return {"verified": False}
+    return {
+        "verified": password_hash.verify(
+            attempt.secret,
+            app_lock.hashed_secret,
+        )
+    }
+
+
+@app.delete("/users/me/app-lock", status_code=status.HTTP_204_NO_CONTENT)
+def delete_app_lock(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is not None:
+        db.delete(app_lock)
+        db.commit()
 
 
 @app.post("/login")

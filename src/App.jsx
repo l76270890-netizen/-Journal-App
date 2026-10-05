@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive, ArrowLeft, ArrowRight, Bell, BookOpen, CalendarDays, Check, ChevronDown,
   ChevronLeft, ChevronRight, CircleHelp, Clock3, Cloud, Command, Compass, Feather,
   Flame, Heart, Home, Leaf, LockKeyhole, LogOut, Menu, MoreHorizontal, Plus,
   Search, Settings, ShieldCheck, Smile, Sparkles, Tag, Trash2, TrendingUp, X,
 } from 'lucide-react';
-import { authenticate as authenticateApi, createNote, deleteNote, getNotes, updateNote, updateProfile } from './api';
+import { authenticate as authenticateApi, createNote, deleteAppLock, deleteNote, getAppLock, getNotes, setAppLock as setAppLockApi, updateNote, updateProfile, verifyAppLock } from './api';
+import './lock.css';
 
 const PHOTO = {
   mountain: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=900&q=85',
@@ -79,6 +80,139 @@ function AuthPage({ onAuth, onDemo }) {
   return <main className="auth-page"><div className="auth-brand"><Brand /><div className="auth-brand-links"><span>Write</span><b>·</b><span>Reflect</span><b>·</b><span>Grow</span></div></div><section className="auth-shell"><div className="auth-story"><div className="story-copy"><span className="eyebrow"><Leaf size={14} /> YOUR SPACE TO BEGIN AGAIN</span><h1>A calmer mind<br />builds a brighter you.</h1><p>Make room for your thoughts. Find clarity in the everyday.</p><div className="story-note">“A little progress each day adds up to big results.”<Leaf size={16} /></div></div></div><div className="auth-form-wrap"><div className="auth-form-head"><span className="eyebrow">YOUR PERSONAL JOURNAL</span><h2>{mode === 'login' ? 'Welcome back.' : 'Create your account.'}</h2><p>{mode === 'login' ? 'A quiet space to pick up where you left off.' : 'A few little details, then you’re all set.'}</p></div><form onSubmit={submit} className="auth-form">{mode === 'signup' && <label>Your name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Alex Carter" autoComplete="name" /></label>}<label>Email address<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" type="email" autoComplete="email" /></label><label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>{error && <p className="form-error">{error}</p>}<button className="btn btn-primary btn-wide" type="submit" disabled={submitting}>{submitting ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}<ArrowRight size={16} /></button></form><p className="auth-switch">{mode === 'login' ? 'New to Luma?' : 'Already have an account?'} <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Log in'}</button></p><button className="demo-link" onClick={onDemo}>Explore the journal first <ArrowRight size={14} /></button><div className="auth-assurance"><LockKeyhole size={14} /> Your journal stays private to your account</div></div></section><footer className="auth-footer"><span>© 2025 Luma Journal</span><span>Make space for what matters.</span></footer></main>;
 }
 
+function PatternInput({ value, onChange, label }) {
+  const addDot = (dot) => {
+    if (!value.includes(String(dot))) onChange(`${value}${dot}`);
+  };
+  return <div className="app-lock-pattern-wrap">
+    <div className="app-lock-pattern" role="group" aria-label={label}>
+      {Array.from({ length: 9 }, (_, dot) => <button
+        key={dot}
+        type="button"
+        className={value.includes(String(dot)) ? 'selected' : ''}
+        aria-label={`Pattern dot ${dot + 1}${value.includes(String(dot)) ? ', selected' : ''}`}
+        aria-pressed={value.includes(String(dot))}
+        onClick={() => addDot(dot)}
+      ><span>{value.includes(String(dot)) ? value.indexOf(String(dot)) + 1 : ''}</span></button>)}
+    </div>
+    <button className="text-link app-lock-clear" type="button" onClick={() => onChange('')}>Clear pattern</button>
+  </div>;
+}
+
+function AppLockSettings({ appLock, onConfigure, onDisable, isDemo }) {
+  const [lockType, setLockType] = useState('pin');
+  const [secret, setSecret] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const save = async (event) => {
+    event.preventDefault();
+    setError('');
+    const valid = lockType === 'pin'
+      ? /^\d{4,8}$/.test(secret)
+      : /^[0-8]{4,9}$/.test(secret) && new Set(secret).size === secret.length;
+    if (!valid) {
+      setError(lockType === 'pin'
+        ? 'Use a PIN with 4 to 8 digits.'
+        : 'Connect at least 4 different dots in your pattern.');
+      return;
+    }
+    if (secret !== confirmation) {
+      setError('The two entries do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await onConfigure(lockType, secret);
+      setSecret('');
+      setConfirmation('');
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      await onDisable();
+    } catch (disableError) {
+      setError(disableError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (isDemo) return <div className="app-lock-explainer">
+    <p>App lock is available for signed-in accounts. Sign in to save a PIN or pattern securely to your account.</p>
+  </div>;
+
+  return <div className="app-lock-settings">
+    <div className="setting-row">
+      <span><b>{appLock.enabled ? 'App lock is on' : 'App lock is off'}</b><small>Require a code when you reopen the app or after 5 minutes of inactivity.</small></span>
+      <span className={`status-badge ${appLock.enabled ? '' : 'status-badge-off'}`}><i />{appLock.enabled ? `${appLock.lock_type === 'pin' ? 'PIN' : 'Pattern'} enabled` : 'Optional'}</span>
+    </div>
+    <p className="app-lock-disclaimer">This is a privacy screen for your signed-in session, not a replacement for your account password.</p>
+    <form className="app-lock-form" onSubmit={save}>
+      <div className="app-lock-type-choice" role="group" aria-label="Choose app lock type">
+        <button type="button" className={lockType === 'pin' ? 'selected' : ''} onClick={() => { setLockType('pin'); setSecret(''); setConfirmation(''); setError(''); }}>PIN</button>
+        <button type="button" className={lockType === 'pattern' ? 'selected' : ''} onClick={() => { setLockType('pattern'); setSecret(''); setConfirmation(''); setError(''); }}>Pattern</button>
+      </div>
+      {lockType === 'pin' ? <>
+        <label className="settings-field">New 4–8 digit PIN<input type="password" inputMode="numeric" autoComplete="new-password" maxLength={8} value={secret} onChange={(event) => setSecret(event.target.value.replace(/\D/g, ''))} /></label>
+        <label className="settings-field">Confirm PIN<input type="password" inputMode="numeric" autoComplete="new-password" maxLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value.replace(/\D/g, ''))} /></label>
+      </> : <>
+        <div className="app-lock-pattern-field"><span>Draw a pattern using at least 4 dots</span><PatternInput value={secret} onChange={setSecret} label="Choose a pattern" /></div>
+        <div className="app-lock-pattern-field"><span>Draw it again to confirm</span><PatternInput value={confirmation} onChange={setConfirmation} label="Confirm your pattern" /></div>
+      </>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="app-lock-actions"><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : appLock.enabled ? 'Update app lock' : 'Enable app lock'}</button>{appLock.enabled && <button className="btn btn-outline danger-outline" type="button" onClick={disable} disabled={busy}>Turn off</button>}</div>
+    </form>
+  </div>;
+}
+
+function AppLockScreen({ user, lockType, onUnlock, onLogout }) {
+  const [secret, setSecret] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (event) => {
+    event.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      if (await onUnlock(lockType, secret)) {
+        setSecret('');
+      } else {
+        setError('That code or pattern is not correct. Try again.');
+        setSecret('');
+      }
+    } catch (unlockError) {
+      setError(unlockError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <main className="app-lock-screen">
+    <section className="app-lock-card">
+      <Brand />
+      <span className="app-lock-icon"><LockKeyhole size={22} /></span>
+      <h1>Welcome back, {user.name?.split(' ')[0] || 'friend'}.</h1>
+      <p>Unlock your journal to continue.</p>
+      <form onSubmit={submit}>
+        {lockType === 'pin'
+          ? <label className="app-lock-pin">Enter your PIN<input type="password" inputMode="numeric" autoComplete="current-password" maxLength={8} value={secret} onChange={(event) => setSecret(event.target.value.replace(/\D/g, ''))} autoFocus /></label>
+          : <div className="app-lock-pattern-field"><span>Draw your pattern</span><PatternInput value={secret} onChange={setSecret} label="Enter your pattern" /></div>}
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="btn btn-primary btn-wide" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Unlock journal'}<ArrowRight size={16} /></button>
+      </form>
+      <button className="app-lock-logout" type="button" onClick={onLogout}>Sign out instead</button>
+    </section>
+  </main>;
+}
+
 function EntryEditor({ entry, onSave, onClose }) {
   const [title, setTitle] = useState(entry?.title || ''); const [body, setBody] = useState(entry?.body || ''); const [mood, setMood] = useState(entry?.mood || 'Calm'); const [tagsText, setTagsText] = useState(entry?.tags?.join(' ') || ''); const [saved, setSaved] = useState(false);
   const save = async () => { if (!title.trim() && !body.trim()) return; const tags = tagsText.split(/[\s,]+/).filter(Boolean).map((tag) => tag.startsWith('#') ? tag : `#${tag.replace(/^#/, '')}`); const succeeded = await onSave({ ...entry, id: entry?.id, title: title.trim() || 'Untitled entry', body: body.trim(), mood, tags, date: entry?.date || new Date().toISOString(), image: entry?.image || null, favorite: entry?.favorite || false, archived: entry?.archived || false }); if (succeeded) { setSaved(true); setTimeout(onClose, 450); } };
@@ -87,12 +221,58 @@ function EntryEditor({ entry, onSave, onClose }) {
 
 function App() {
   const [user, setUser] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('luma:session')); return saved?.token || saved?.demo ? saved : null; } catch { return null; } });
+  const [appLock, setAppLock] = useState({ enabled: false, lock_type: null });
+  const [appLocked, setAppLocked] = useState(false);
+  const [lockReady, setLockReady] = useState(false);
+  const [lockError, setLockError] = useState('');
+  const [lockRetry, setLockRetry] = useState(0);
   const [view, setView] = useState('home'); const [entries, setEntries] = useState([]); const [entriesLoading, setEntriesLoading] = useState(false); const [editor, setEditor] = useState(null); const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState(''); const [moodFilter, setMoodFilter] = useState('All moods'); const [sort, setSort] = useState('Newest first'); const [tagFilter, setTagFilter] = useState(''); const [toast, setToast] = useState(''); const [menuOpen, setMenuOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [mobileSearch, setMobileSearch] = useState(false); const [selectedDate, setSelectedDate] = useState(null);
   const searchInput = useRef(null);
+  const lastActivity = useRef(Date.now());
+  useEffect(() => {
+    let cancelled = false;
+    setLockReady(false);
+    setLockError('');
+    if (!user) {
+      setAppLock({ enabled: false, lock_type: null });
+      setAppLocked(false);
+      setLockReady(true);
+      return () => { cancelled = true; };
+    }
+    if (user.demo) {
+      setAppLock({ enabled: false, lock_type: null });
+      setAppLocked(false);
+      setLockReady(true);
+      return () => { cancelled = true; };
+    }
+    getAppLock(user.token)
+      .then((status) => {
+        if (cancelled) return;
+        setAppLock(status);
+        setAppLocked(status.enabled);
+        setLockReady(true);
+      })
+      .catch((error) => {
+        if (!cancelled) setLockError(error.message);
+      });
+    return () => { cancelled = true; };
+  }, [user?.token, user?.demo, lockRetry]);
+
+  const lockApp = useCallback(() => {
+    setAppLocked(true);
+    setEntries([]);
+    setSelected(null);
+    setEditor(null);
+  }, []);
+
   useEffect(() => {
     if (!user) {
       setEntries([]);
+      setEntriesLoading(false);
+      return undefined;
+    }
+    if (!lockReady || appLocked) {
       setEntriesLoading(false);
       return undefined;
     }
@@ -114,16 +294,41 @@ function App() {
       })
       .finally(() => { if (!cancelled) setEntriesLoading(false); });
     return () => { cancelled = true; };
-  }, [user?.token, user?.demo]);
+  }, [user?.token, user?.demo, lockReady, appLocked]);
+
+  useEffect(() => {
+    if (!user || user.demo || !lockReady || !appLock.enabled || appLocked) return undefined;
+    let timer;
+    const armIdleTimer = () => {
+      lastActivity.current = Date.now();
+      window.clearTimeout(timer);
+      timer = window.setTimeout(lockApp, 5 * 60 * 1000);
+    };
+    const checkWhenVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastActivity.current >= 5 * 60 * 1000) {
+        lockApp();
+      }
+    };
+    const events = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'];
+    events.forEach((eventName) => window.addEventListener(eventName, armIdleTimer, { passive: true }));
+    document.addEventListener('visibilitychange', checkWhenVisible);
+    armIdleTimer();
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((eventName) => window.removeEventListener(eventName, armIdleTimer));
+      document.removeEventListener('visibilitychange', checkWhenVisible);
+    };
+  }, [user?.token, user?.demo, lockReady, appLock.enabled, appLocked, lockApp]);
   useEffect(() => { if (user?.demo) localStorage.setItem(storageKey('entries', user), JSON.stringify(entries)); }, [entries, user]);
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
-  useEffect(() => { const handleShortcut = (event) => { const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable; if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchInput.current?.focus(); } else if (!editing && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); setEditor({}); } }; window.addEventListener('keydown', handleShortcut); return () => window.removeEventListener('keydown', handleShortcut); }, []);
+  useEffect(() => { const handleShortcut = (event) => { if (!lockReady || appLocked) return; const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable; if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchInput.current?.focus(); } else if (!editing && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); setEditor({}); } }; window.addEventListener('keydown', handleShortcut); return () => window.removeEventListener('keydown', handleShortcut); }, [lockReady, appLocked]);
   const activeEntries = entries.filter((entry) => !entry.archived);
   const filtered = useMemo(() => { let result = view === 'archive' ? entries.filter((entry) => entry.archived) : activeEntries; if (view === 'favorites') result = result.filter((entry) => entry.favorite); if (tagFilter) result = result.filter((entry) => entry.tags.includes(tagFilter)); if (moodFilter !== 'All moods') result = result.filter((entry) => entry.mood === moodFilter); if (selectedDate && ['journal', 'calendar'].includes(view)) result = result.filter((entry) => new Date(entry.date).toDateString() === selectedDate.toDateString()); const needle = query.trim().toLowerCase(); if (needle) result = result.filter((entry) => `${entry.title} ${entry.body} ${entry.tags.join(' ')}`.toLowerCase().includes(needle)); return [...result].sort((a, b) => sort === 'Oldest first' ? new Date(a.date) - new Date(b.date) : new Date(b.date) - new Date(a.date)); }, [entries, activeEntries, view, tagFilter, moodFilter, selectedDate, query, sort]);
   const notify = (message) => { setToast(message); setTimeout(() => setToast(''), 2500); };
   const authenticate = async (credentials) => {
     const authenticatedUser = await authenticateApi(credentials);
     localStorage.setItem('luma:session', JSON.stringify(authenticatedUser));
+    setLockReady(false);
     setUser(authenticatedUser);
     setView('home');
   };
@@ -194,6 +399,24 @@ function App() {
       notify(error.message);
     }
   };
+  const configureAppLock = async (lockType, secret) => {
+    const status = await setAppLockApi(user.token, lockType, secret);
+    setAppLock(status);
+    notify('App lock enabled.');
+  };
+  const disableAppLock = async () => {
+    await deleteAppLock(user.token);
+    setAppLock({ enabled: false, lock_type: null });
+    notify('App lock turned off.');
+  };
+  const unlockApp = async (lockType, secret) => {
+    const verified = await verifyAppLock(user.token, lockType, secret);
+    if (verified) {
+      lastActivity.current = Date.now();
+      setAppLocked(false);
+    }
+    return verified;
+  };
   const go = (id) => { setView(id); setTagFilter(''); setSelectedDate(null); setQuery(''); setSelected(null); setMenuOpen(false); };
   const uniqueTags = [...new Set(activeEntries.flatMap((entry) => entry.tags))].sort();
   const latest = [...activeEntries].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -201,6 +424,8 @@ function App() {
   const dateToday = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   if (!user) return <AuthPage onAuth={authenticate} onDemo={enterDemo} />;
+  if (!lockReady) return <main className="app-lock-screen"><section className="app-lock-card"><Brand /><span className="app-lock-icon"><LockKeyhole size={22} /></span><h1>{lockError ? 'App lock unavailable' : 'Checking your app lock…'}</h1>{lockError && <><p>{lockError}</p><button className="btn btn-primary btn-wide" onClick={() => { setLockError(''); setLockRetry((retry) => retry + 1); }}>Try again</button><button className="app-lock-logout" onClick={logout}>Sign out</button></>}</section></main>;
+  if (appLocked && appLock.enabled) return <AppLockScreen user={user} lockType={appLock.lock_type} onUnlock={unlockApp} onLogout={logout} />;
   const viewTitles = { journal: 'My journal', favorites: 'Favorites', archive: 'Archive', tags: 'Your tags', calendar: 'Calendar', settings: 'Settings' };
   const heading = viewTitles[view] || (view === 'home' ? 'Your journal, at a glance' : 'Your journal');
   const openEntry = (entry) => { setSelected(entry); setView('detail'); };
@@ -228,7 +453,7 @@ function App() {
             <div className="settings-sections">
               <section className="settings-card" id="profile"><div className="settings-card-heading"><div><h2>Your profile</h2><p>A little about the person behind the pages.</p></div><div className="avatar avatar-large">{greeting[0]?.toUpperCase()}</div></div><label className="settings-field">Name<input defaultValue={user.name} onBlur={(e) => saveUserName(e.target.value)} /></label><label className="settings-field">Email address<input defaultValue={user.email} disabled /></label><div className="settings-card-footer"><span>Personal journal</span><button className="btn btn-outline" onClick={() => notify('Your profile is up to date.')}>Save changes</button></div></section>
               <section className="settings-card" id="account"><div className="settings-card-heading"><div><h2>Account</h2><p>Manage your Luma Journal session.</p></div><ShieldCheck size={21} className="settings-card-icon" /></div><div className="setting-row"><span><b>Journal storage</b><small>{user.demo ? 'Demo entries are saved in this browser.' : 'Your entries are saved to your account.'}</small></span><span className="status-badge"><i /> {user.demo ? 'On this device' : 'Account storage'}</span></div><div className="setting-row"><span><b>Sign-in email</b><small>{user.email}</small></span><LockKeyhole size={17} /></div><div className="settings-card-footer"><span>Need a fresh start?</span><button className="btn btn-outline danger-outline" onClick={logout}><LogOut size={15} /> Log out</button></div></section>
-              <section className="settings-card" id="privacy-security"><div className="settings-card-heading"><div><h2>Privacy & security</h2><p>Your journal belongs to you.</p></div><LockKeyhole size={20} className="settings-card-icon" /></div><div className="privacy-note"><ShieldCheck size={18} /><div><b>Private by nature</b><p>{user.demo ? 'Demo entries are stored in this browser.' : 'Your journal entries are stored with your account and protected by sign-in.'} This app does not currently include password recovery.</p></div></div></section>
+              <section className="settings-card" id="privacy-security"><div className="settings-card-heading"><div><h2>Privacy & security</h2><p>Your journal belongs to you.</p></div><LockKeyhole size={20} className="settings-card-icon" /></div><div className="privacy-note"><ShieldCheck size={18} /><div><b>Private by nature</b><p>{user.demo ? 'Demo entries are stored in this browser.' : 'Your journal entries are stored with your account and protected by sign-in.'} This app does not currently include password recovery.</p></div></div><div className="app-lock-divider" /><div className="app-lock-heading"><div><b>Optional app lock</b><p>Choose a PIN or a pattern to lock this account when reopening the app or after inactivity.</p></div><LockKeyhole size={17} /></div><AppLockSettings appLock={appLock} onConfigure={configureAppLock} onDisable={disableAppLock} isDemo={user.demo} /></section>
               <section className="settings-card" id="appearance"><div className="settings-card-heading"><div><h2>Appearance</h2><p>A softer space for your everyday.</p></div><Sparkles size={20} className="settings-card-icon" /></div><div className="appearance-choice"><span className="appearance-swatch" /><span><b>Calm & considered</b><small>Warm paper, soft greens, and plenty of breathing room.</small></span><Check size={17} /></div></section>
             </div>
           </div>
