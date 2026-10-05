@@ -38,7 +38,8 @@ except ImportError:  # pragma: no cover - fallback for running files directly
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    raise RuntimeError("Set SECRET_KEY in backend/.env before starting the API.")
+    raise RuntimeError(
+        "Set SECRET_KEY in backend/.env before starting the API.")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -50,7 +51,7 @@ app.add_middleware(
         origin.strip()
         for origin in os.getenv(
             "FRONTEND_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173",
+            "http://journal-app-murex-beta.vercel.app",
         ).split(",")
         if origin.strip()
     ],
@@ -121,7 +122,8 @@ def get_notes(
     current_user: User = Depends(get_current_user),
 ) -> list[Note]:
     return db.scalars(
-        select(Note).where(Note.user_id == current_user.id).order_by(Note.id.desc())
+        select(Note).where(Note.user_id ==
+                           current_user.id).order_by(Note.id.desc())
     ).all()
 
 
@@ -133,7 +135,8 @@ def get_note(
 ) -> Note:
     note = db.get(Note, note_id)
     if note is None or note.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
     return note
 
 
@@ -146,7 +149,8 @@ def update_note(
 ) -> Note:
     note = db.get(Note, note_id)
     if note is None or note.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
     for field, value in note_data.model_dump().items():
         setattr(note, field, value)
@@ -163,7 +167,8 @@ def delete_note(
 ) -> None:
     note = db.get(Note, note_id)
     if note is None or note.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
     db.delete(note)
     db.commit()
