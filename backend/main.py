@@ -1,6 +1,8 @@
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -11,15 +13,28 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from database import Base, engine, get_db
-from models import Note, User
-from schemas import (
-    NoteCreate,
-    NoteResponse,
-    NoteUpdate,
-    ProfileUpdate,
-    RegisterRequest,
-)
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+try:
+    from .database import Base, engine, get_db
+    from .models import Note, User
+    from .schemas import (
+        NoteCreate,
+        NoteResponse,
+        NoteUpdate,
+        ProfileUpdate,
+        RegisterRequest,
+    )
+except ImportError:  # pragma: no cover - fallback for running files directly
+    from database import Base, engine, get_db
+    from models import Note, User
+    from schemas import (
+        NoteCreate,
+        NoteResponse,
+        NoteUpdate,
+        ProfileUpdate,
+        RegisterRequest,
+    )
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:

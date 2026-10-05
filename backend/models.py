@@ -1,7 +1,10 @@
 from sqlalchemy import Boolean, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from database import Base
+try:
+    from .database import Base
+except ImportError:  # pragma: no cover - fallback when run directly from the backend dir
+    from database import Base
 
 
 class Note(Base):
