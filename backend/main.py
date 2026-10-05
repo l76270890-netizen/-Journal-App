@@ -17,6 +17,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 try:
     from .database import Base, engine, get_db
+    from .email_service import send_welcome_email
     from .models import Note, User, UserAppLock
     from .schemas import (
         AppLockSetup,
@@ -28,6 +29,7 @@ try:
     )
 except ImportError:  # pragma: no cover - fallback for running files directly
     from database import Base, engine, get_db
+    from email_service import send_welcome_email
     from models import Note, User, UserAppLock
     from schemas import (
         AppLockSetup,
@@ -271,6 +273,7 @@ def delete_app_lock(
 @app.post("/login")
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
+    welcome_email: bool = False,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     user = db.scalars(
@@ -293,6 +296,8 @@ def login(
         SECRET_KEY,
         algorithm=ALGORITHM,
     )
+    if welcome_email:
+        send_welcome_email(user.email, user.name)
     return {
         "access_token": token,
         "token_type": "bearer",

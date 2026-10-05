@@ -49,7 +49,7 @@ export async function authenticate({ name, email, password, mode }) {
     });
   }
 
-  const session = await request('/login', {
+  const session = await request(`/login${mode === 'signup' ? '?welcome_email=true' : ''}`, {
     method: 'POST',
     form: { username: normalizedEmail, password },
   });
