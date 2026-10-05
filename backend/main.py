@@ -51,7 +51,8 @@ app.add_middleware(
         origin.strip()
         for origin in os.getenv(
             "FRONTEND_ORIGINS",
-            "http://journal-app-murex-beta.vercel.app",
+            "http://localhost:5173,http://127.0.0.1:5173,"
+            "https://journal-app-murex-beta.vercel.app",
         ).split(",")
         if origin.strip()
     ],
