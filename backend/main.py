@@ -1,10 +1,8 @@
-
-import json
-import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Annotated
 
 import jwt
 from dotenv import load_dotenv
@@ -13,10 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt import InvalidTokenError
 from pwdlib import PasswordHash
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 try:
     from .database import get_db, initialize_database
     from .email_service import send_welcome_email
+    from .models import Note, User, UserAppLock
     from .schemas import (
         AppLockSetup,
         NoteCreate,
@@ -28,6 +30,7 @@ try:
 except ImportError:
     from database import get_db, initialize_database
     from email_service import send_welcome_email
+    from models import Note, User, UserAppLock
     from schemas import (
         AppLockSetup,
         NoteCreate,
@@ -41,17 +44,18 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    raise RuntimeError("Set SECRET_KEY in backend/.env.")
+    raise RuntimeError("SECRET_KEY must be configured.")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 password_hash = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+DbSession = Annotated[Session, Depends(get_db)]
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     initialize_database()
     yield
 
@@ -75,44 +79,10 @@ app.add_middleware(
 )
 
 
-def row_to_dict(cursor, row):
-    """Convert a database row into a dictionary."""
-    if row is None:
-        return None
-
-    if isinstance(row, dict):
-        return row
-
-    return {
-        column[0]: row[index]
-        for index, column in enumerate(cursor.description)
-    }
-
-
-def fetch_one(db, query: str, parameters=()):
-    cursor = db.execute(query, parameters)
-    return row_to_dict(cursor, cursor.fetchone())
-
-
-def fetch_all(db, query: str, parameters=()):
-    cursor = db.execute(query, parameters)
-    return [
-        row_to_dict(cursor, row)
-        for row in cursor.fetchall()
-    ]
-
-
-def note_to_response(note: dict) -> dict:
-    note["tags"] = json.loads(note["tags"] or "[]")
-    note["favorite"] = bool(note["favorite"])
-    note["archived"] = bool(note["archived"])
-    return note
-
-
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db=Depends(get_db),
-) -> dict:
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: DbSession,
+) -> User:
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired authentication token",
@@ -133,12 +103,7 @@ def get_current_user(
     except InvalidTokenError as exc:
         raise credentials_error from exc
 
-    user = fetch_one(
-        db,
-        "SELECT * FROM users WHERE username = ?",
-        (username,),
-    )
-
+    user = db.scalar(select(User).where(User.username == username))
     if user is None:
         raise credentials_error
 
@@ -156,62 +121,47 @@ def home():
 )
 def register(
     registration: RegisterRequest,
-    db=Depends(get_db),
+    db: DbSession,
 ):
     email = str(registration.email).lower()
+    user = User(
+        username=email,
+        email=email,
+        name=registration.name.strip(),
+        hashed_password=password_hash.hash(registration.password),
+    )
+    db.add(user)
 
     try:
-        cursor = db.execute(
-            """
-            INSERT INTO users (
-                username,
-                email,
-                name,
-                hashed_password
-            )
-            VALUES (?, ?, ?, ?)
-            RETURNING id, email, name
-            """,
-            (
-                email,
-                email,
-                registration.name.strip(),
-                password_hash.hash(registration.password),
-            ),
-        )
-
-        user = row_to_dict(cursor, cursor.fetchone())
         db.commit()
-
-    except Exception as exc:
+        db.refresh(user)
+    except IntegrityError as exc:
         db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists",
+        ) from exc
 
-        if "unique" in str(exc).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email already exists",
-            ) from exc
-
-        raise
-
-    return user
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+    }
 
 
 @app.post("/login")
 def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: DbSession,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     welcome_email: bool = False,
-    db=Depends(get_db),
 ):
-    user = fetch_one(
-        db,
-        "SELECT * FROM users WHERE email = ?",
-        (form_data.username.lower(),),
+    user = db.scalar(
+        select(User).where(User.email == form_data.username.lower())
     )
 
     if user is None or not password_hash.verify(
         form_data.password,
-        user["hashed_password"],
+        user.hashed_password,
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -222,40 +172,33 @@ def login(
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
     )
-
     token = jwt.encode(
-        {"sub": user["username"], "exp": expires_at},
+        {"sub": user.username, "exp": expires_at},
         SECRET_KEY,
         algorithm=ALGORITHM,
     )
 
     if welcome_email:
-        send_welcome_email(user["email"], user["name"])
+        send_welcome_email(user.email, user.name)
 
     return {
         "access_token": token,
         "token_type": "bearer",
-        "name": user["name"],
-        "email": user["email"],
+        "name": user.name,
+        "email": user.email,
     }
 
 
 @app.get("/notes", response_model=list[NoteResponse])
 def get_notes(
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    notes = fetch_all(
-        db,
-        """
-        SELECT * FROM notes
-        WHERE user_id = ?
-        ORDER BY id DESC
-        """,
-        (current_user["id"],),
-    )
-
-    return [note_to_response(note) for note in notes]
+    return db.scalars(
+        select(Note)
+        .where(Note.user_id == current_user.id)
+        .order_by(Note.id.desc())
+    ).all()
 
 
 @app.post(
@@ -265,47 +208,27 @@ def get_notes(
 )
 def create_note(
     note_data: NoteCreate,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    cursor = db.execute(
-        """
-        INSERT INTO notes (
-            title, body, mood, tags, date, image,
-            favorite, archived, user_id
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING *
-        """,
-        (
-            note_data.title,
-            note_data.body,
-            note_data.mood,
-            json.dumps(note_data.tags),
-            note_data.date,
-            note_data.image,
-            int(note_data.favorite),
-            int(note_data.archived),
-            current_user["id"],
-        ),
-    )
-
-    note = row_to_dict(cursor, cursor.fetchone())
+    note = Note(**note_data.model_dump(), user_id=current_user.id)
+    db.add(note)
     db.commit()
-
-    return note_to_response(note)
+    db.refresh(note)
+    return note
 
 
 @app.get("/notes/{note_id}", response_model=NoteResponse)
 def get_note(
     note_id: int,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    note = fetch_one(
-        db,
-        "SELECT * FROM notes WHERE id = ? AND user_id = ?",
-        (note_id, current_user["id"]),
+    note = db.scalar(
+        select(Note).where(
+            Note.id == note_id,
+            Note.user_id == current_user.id,
+        )
     )
 
     if note is None:
@@ -314,62 +237,35 @@ def get_note(
             detail="Note not found",
         )
 
-    return note_to_response(note)
+    return note
 
 
 @app.put("/notes/{note_id}", response_model=NoteResponse)
 def update_note(
     note_id: int,
     note_data: NoteUpdate,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    existing = fetch_one(
-        db,
-        "SELECT id FROM notes WHERE id = ? AND user_id = ?",
-        (note_id, current_user["id"]),
+    note = db.scalar(
+        select(Note).where(
+            Note.id == note_id,
+            Note.user_id == current_user.id,
+        )
     )
 
-    if existing is None:
+    if note is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Note not found",
         )
 
-    values = note_data.model_dump()
-    values["tags"] = json.dumps(values["tags"])
-    values["favorite"] = int(values["favorite"])
-    values["archived"] = int(values["archived"])
+    for field, value in note_data.model_dump().items():
+        setattr(note, field, value)
 
-    db.execute(
-        """
-        UPDATE notes
-        SET title = ?, body = ?, mood = ?, tags = ?,
-            date = ?, image = ?, favorite = ?, archived = ?
-        WHERE id = ? AND user_id = ?
-        """,
-        (
-            values["title"],
-            values["body"],
-            values["mood"],
-            values["tags"],
-            values["date"],
-            values["image"],
-            values["favorite"],
-            values["archived"],
-            note_id,
-            current_user["id"],
-        ),
-    )
     db.commit()
-
-    updated = fetch_one(
-        db,
-        "SELECT * FROM notes WHERE id = ? AND user_id = ?",
-        (note_id, current_user["id"]),
-    )
-
-    return note_to_response(updated)
+    db.refresh(note)
+    return note
 
 
 @app.delete(
@@ -378,85 +274,72 @@ def update_note(
 )
 def delete_note(
     note_id: int,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    cursor = db.execute(
-        "DELETE FROM notes WHERE id = ? AND user_id = ?",
-        (note_id, current_user["id"]),
+    note = db.scalar(
+        select(Note).where(
+            Note.id == note_id,
+            Note.user_id == current_user.id,
+        )
     )
 
-    if cursor.rowcount == 0:
-        db.rollback()
+    if note is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Note not found",
         )
 
+    db.delete(note)
     db.commit()
 
 
 @app.put("/users/me")
 def update_profile(
     profile: ProfileUpdate,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    name = profile.name.strip()
-
-    db.execute(
-        "UPDATE users SET name = ? WHERE id = ?",
-        (name, current_user["id"]),
-    )
+    current_user.name = profile.name.strip()
     db.commit()
 
     return {
-        "name": name,
-        "email": current_user["email"],
+        "name": current_user.name,
+        "email": current_user.email,
     }
 
 
 @app.get("/users/me/app-lock")
 def get_app_lock(
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    app_lock = fetch_one(
-        db,
-        "SELECT * FROM user_app_locks WHERE user_id = ?",
-        (current_user["id"],),
-    )
-
+    app_lock = db.get(UserAppLock, current_user.id)
     return {
         "enabled": app_lock is not None,
-        "lock_type": app_lock["lock_type"] if app_lock else None,
+        "lock_type": app_lock.lock_type if app_lock else None,
     }
 
 
 @app.put("/users/me/app-lock")
 def set_app_lock(
     setup: AppLockSetup,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    db.execute(
-        """
-        INSERT INTO user_app_locks (
-            user_id, lock_type, hashed_secret
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is None:
+        app_lock = UserAppLock(
+            user_id=current_user.id,
+            lock_type=setup.lock_type,
+            hashed_secret=password_hash.hash(setup.secret),
         )
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            lock_type = excluded.lock_type,
-            hashed_secret = excluded.hashed_secret
-        """,
-        (
-            current_user["id"],
-            setup.lock_type,
-            password_hash.hash(setup.secret),
-        ),
-    )
-    db.commit()
+        db.add(app_lock)
+    else:
+        app_lock.lock_type = setup.lock_type
+        app_lock.hashed_secret = password_hash.hash(setup.secret)
 
+    db.commit()
     return {
         "enabled": True,
         "lock_type": setup.lock_type,
@@ -466,22 +349,17 @@ def set_app_lock(
 @app.post("/users/me/app-lock/verify")
 def verify_app_lock(
     attempt: AppLockSetup,
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    app_lock = fetch_one(
-        db,
-        "SELECT * FROM user_app_locks WHERE user_id = ?",
-        (current_user["id"],),
-    )
-
-    if app_lock is None or app_lock["lock_type"] != attempt.lock_type:
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is None or app_lock.lock_type != attempt.lock_type:
         return {"verified": False}
 
     return {
         "verified": password_hash.verify(
             attempt.secret,
-            app_lock["hashed_secret"],
+            app_lock.hashed_secret,
         )
     }
 
@@ -491,11 +369,10 @@ def verify_app_lock(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_app_lock(
-    db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    db.execute(
-        "DELETE FROM user_app_locks WHERE user_id = ?",
-        (current_user["id"],),
-    )
-    db.commit()
+    app_lock = db.get(UserAppLock, current_user.id)
+    if app_lock is not None:
+        db.delete(app_lock)
+        db.commit()
