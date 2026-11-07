@@ -1,0 +1,13 @@
+app/
+backend/
+add_data.py
+create_users_table.py
+database.py
+email_service.py
+index.py
+main.py
+migrate_sqlite_to_turso.py
+models.py
+notes.db
+requirements.txt
+schemas.py
