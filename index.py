@@ -1,2 +1,2 @@
-"""Vercel FastAPI entrypoint for the backend project root."""
-from app.main import app
+"""Vercel entry point for the journal API."""
+from main import app
