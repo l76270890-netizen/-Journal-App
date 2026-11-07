@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "main.py": {
+      "excludeFiles": "{*.db*,.env,.env.*,.venv/**,venv/**,__pycache__/**,add_data.py,create_users_table.py,migrate_sqlite_to_turso.py}"
+    }
+  }
+}
