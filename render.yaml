@@ -12,4 +12,4 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: FRONTEND_ORIGINS
-        value: https://journal-app-laurd.vercel.app
+        value: https://journal-app-laurd.vercel.app,https://journal-app-murex-beta.vercel.app
