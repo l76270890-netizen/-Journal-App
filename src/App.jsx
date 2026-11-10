@@ -30,6 +30,7 @@ const seedEntries = [
   { id: 'e4', title: 'Overcoming a tough day', body: 'It was a hard day, but I got through it. I’m learning that it is okay to have bad days. Tomorrow is a new day.', mood: 'Sad', tags: ['#selfcare', '#mindset'], date: '2025-07-09T19:20:00', image: PHOTO.city, favorite: false, archived: false },
   { id: 'e5', title: 'A walk by the water', body: 'The air felt softer near the coast. I came home with a clearer head and a few thoughts worth holding onto.', mood: 'Calm', tags: ['#life', '#selfcare'], date: '2025-07-06T17:05:00', image: PHOTO.coast, favorite: false, archived: false },
   { id: 'e6', title: 'Finding my way back', body: 'Some days ask us to be patient with ourselves. I am trying to meet this season with a little more kindness.', mood: 'Grateful', tags: ['#growth', '#mindset'], date: '2025-07-03T12:32:00', image: PHOTO.woods, favorite: false, archived: false },
+  { id: 'e7', title: 'A fresh start today', body: 'Opening a new page and starting where I am. Nothing grand, just here.', mood: 'Calm', tags: ['#life'], date: new Date(new Date().setHours(8, 30, 0, 0)).toISOString(), image: null, favorite: false, archived: false },
 ];
 
 const NAV = [
@@ -61,16 +62,68 @@ function EntryCard({ entry, onOpen, onFavorite, compact = false }) {
   </article>;
 }
 
-function CalendarWidget({ entries, onSelectDate, large = false }) {
-  const [month, setMonth] = useState(new Date(2025, 6, 1));
+const startOfDay = (value) => { const d = new Date(value); d.setHours(0, 0, 0, 0); return d; };
+const dayKey = (value) => { const d = startOfDay(value); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+function CalendarWidget({ entries, onSelectDate, selectedDate, onNewEntry, large = false }) {
+  const today = startOfDay(new Date());
+  const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const accent = large ? '#7d9a7d' : '#6f8f6f';
+
+  const entriesByDay = useMemo(() => {
+    const map = new Map();
+    entries.forEach((entry) => {
+      const key = dayKey(entry.date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(entry);
+    });
+    return map;
+  }, [entries]);
+
   const first = new Date(month.getFullYear(), month.getMonth(), 1);
   const start = (first.getDay() + 6) % 7;
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-  const hasEntry = new Set(entries.map((entry) => new Date(entry.date).toDateString()));
+  const isCurrentMonth = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth();
+  const shiftMonth = (offset) => setMonth(new Date(month.getFullYear(), month.getMonth() + offset, 1));
+  const selectedKey = selectedDate ? dayKey(selectedDate) : null;
+  const monthLabel = month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
   return <div className={`calendar-widget ${large ? 'calendar-widget-large' : ''}`}>
-    <div className="calendar-title"><span>{month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span><div><button className="icon-btn" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={16} /></button><button className="icon-btn" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={16} /></button></div></div>
+    <div className="calendar-title">
+      <div className="calendar-heading">
+        <span>{large ? monthLabel : month.toLocaleDateString('en-US', { month: 'long' })}</span>
+        {!large && <small>{month.getFullYear()}</small>}
+      </div>
+      <div className="calendar-actions">
+        {!isCurrentMonth && <button className="calendar-today-btn" onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>Today</button>}
+        <button className="icon-btn" aria-label="Previous month" onClick={() => shiftMonth(-1)}><ChevronLeft size={16} /></button>
+        <button className="icon-btn" aria-label="Next month" onClick={() => shiftMonth(1)}><ChevronRight size={16} /></button>
+      </div>
+    </div>
     <div className="calendar-grid calendar-weekdays">{['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => <span key={d}>{d}</span>)}</div>
-    <div className="calendar-grid">{Array.from({ length: start }, (_, i) => <span className="calendar-blank" key={`b${i}`} />)}{Array.from({ length: days }, (_, i) => { const date = new Date(month.getFullYear(), month.getMonth(), i + 1); const active = hasEntry.has(date.toDateString()); return <button key={i} className={`calendar-day ${active ? 'has-entry' : ''} ${i + 1 === 15 && month.getMonth() === 6 ? 'is-today' : ''}`} onClick={() => onSelectDate?.(date)}>{i + 1}{active && <i />}</button>; })}</div>
+    <div className="calendar-grid calendar-days">
+      {Array.from({ length: start }, (_, i) => <span className="calendar-blank" key={`b${i}`} />)}
+      {Array.from({ length: days }, (_, i) => {
+        const date = new Date(month.getFullYear(), month.getMonth(), i + 1);
+        const key = dayKey(date);
+        const dayEntries = entriesByDay.get(key) || [];
+        const isToday = key === dayKey(today);
+        const isSelected = key === selectedKey;
+        const summary = dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'} on ${date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}` : `No entries on ${date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+        return <button
+          key={key}
+          className={`calendar-day ${dayEntries.length ? 'has-entry' : ''} ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
+          title={summary}
+          aria-label={summary}
+          aria-pressed={isSelected}
+          onClick={() => onSelectDate?.(date)}
+        >
+          <span className="calendar-day-number">{i + 1}</span>
+          {dayEntries.length > 0 && <span className="calendar-dots">{dayEntries.slice(0, 3).map((entry) => <i key={entry.id} style={{ background: (MOODS.find((m) => m.name === entry.mood) || MOODS[1]).color }} />)}</span>}
+        </button>;
+      })}
+    </div>
+    {onNewEntry && <button className="calendar-new-btn" onClick={() => onNewEntry(selectedDate)} style={{ '--calendar-accent': accent }}><Plus size={14} /> {selectedDate ? `Write on ${dateLabel(selectedDate, { month: 'short', day: 'numeric' })}` : 'Write a new entry'}</button>}
   </div>;
 }
 
@@ -418,6 +471,17 @@ function App() {
     return verified;
   };
   const go = (id) => { setView(id); setTagFilter(''); setSelectedDate(null); setQuery(''); setSelected(null); setMenuOpen(false); };
+  const pickCalendarDate = (date) => { setSelectedDate(startOfDay(date)); setTagFilter(''); setQuery(''); };
+  const composeForDate = (date) => {
+    const isToday = !date || dayKey(date) === dayKey(new Date());
+    const stamp = isToday ? new Date() : new Date(startOfDay(date).getTime() + 12 * 60 * 60 * 1000);
+    setEditor({ date: stamp.toISOString() });
+  };
+  const writeOnSelectedDay = () => {
+    if (selectedDate) { composeForDate(selectedDate); return; }
+    setSelectedDate(startOfDay(new Date()));
+    composeForDate(new Date());
+  };
   const uniqueTags = [...new Set(activeEntries.flatMap((entry) => entry.tags))].sort();
   const latest = [...activeEntries].sort((a, b) => new Date(b.date) - new Date(a.date));
   const greeting = user?.name?.split(' ')[0] || 'friend';
@@ -441,9 +505,9 @@ function App() {
             <div className="section-heading"><div><h2>Recent entries</h2><p>Your thoughts, lately</p></div><button className="text-link" onClick={() => go('journal')}>View all <ArrowRight size={15} /></button></div>
             <div className="entry-list">{latest.slice(0, 4).map((entry) => <EntryCard key={entry.id} entry={entry} onOpen={openEntry} onFavorite={toggleFavorite} />)}{latest.length === 0 && <EmptyState onCreate={() => setEditor({})} />}</div>
             <div className="reflection-banner"><div className="reflection-sun">☼</div><div><span className="eyebrow">A GENTLE REMINDER</span><p>“You don’t have to have it all figured out to take the next step.”</p></div><Leaf size={28} /></div>
-          </section><aside className="dashboard-rail"><div className="rail-card calendar-card"><div className="section-heading section-heading-tight"><div><h2>Your calendar</h2><p>Little moments add up</p></div><button className="icon-btn" onClick={() => go('calendar')} aria-label="Open calendar"><ArrowRight size={16} /></button></div><CalendarWidget entries={activeEntries} onSelectDate={(date) => { setSelectedDate(date); setView('journal'); }} /></div><div className="rail-card mood-card"><div className="section-heading section-heading-tight"><div><h2>Mood check-in</h2><p>A feeling for today</p></div><span className="today-soft">Today</span></div><div className="weekly-moods">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => <div key={`${day}${i}`}><span className={`mood-dot ${['mood-green', 'mood-green', 'mood-yellow', 'mood-green', 'mood-blue', 'mood-gray', 'mood-gray'][i]}`}>{['☻', '☻', '☼', '♡', '☹', '·', '·'][i]}</span><small>{day}</small></div>)}</div><button className="mood-reflect" onClick={() => setEditor({ mood: 'Calm' })}><span className="reflect-leaf"><Leaf size={19} /></span><span><b>How are you feeling?</b><small>Check in with yourself</small></span><ChevronRight size={17} /></button></div><div className="rail-card tags-card"><div className="section-heading section-heading-tight"><div><h2>Your tags</h2><p>Find a familiar thought</p></div><button className="text-link" onClick={() => go('tags')}>All <ArrowRight size={14} /></button></div><div className="quick-tags">{uniqueTags.slice(0, 6).map((tag) => <button key={tag} className="tag-chip" onClick={() => { setTagFilter(tag); setView('journal'); }}>{tag}</button>)}</div></div><div className="insight-note"><Sparkles size={17} /><p>Every page you write is a little more understanding of yourself.</p></div></aside></div></>}
+          </section><aside className="dashboard-rail"><div className="rail-card calendar-card"><div className="section-heading section-heading-tight"><div><h2>Your calendar</h2><p>Little moments add up</p></div><button className="icon-btn" onClick={() => go('calendar')} aria-label="Open calendar"><ArrowRight size={16} /></button></div><CalendarWidget entries={activeEntries} onSelectDate={pickCalendarDate} selectedDate={selectedDate} onNewEntry={composeForDate} /></div><div className="rail-card mood-card"><div className="section-heading section-heading-tight"><div><h2>Mood check-in</h2><p>A feeling for today</p></div><span className="today-soft">Today</span></div><div className="weekly-moods">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => <div key={`${day}${i}`}><span className={`mood-dot ${['mood-green', 'mood-green', 'mood-yellow', 'mood-green', 'mood-blue', 'mood-gray', 'mood-gray'][i]}`}>{['☻', '☻', '☼', '♡', '☹', '·', '·'][i]}</span><small>{day}</small></div>)}</div><button className="mood-reflect" onClick={() => setEditor({ mood: 'Calm' })}><span className="reflect-leaf"><Leaf size={19} /></span><span><b>How are you feeling?</b><small>Check in with yourself</small></span><ChevronRight size={17} /></button></div><div className="rail-card tags-card"><div className="section-heading section-heading-tight"><div><h2>Your tags</h2><p>Find a familiar thought</p></div><button className="text-link" onClick={() => go('tags')}>All <ArrowRight size={14} /></button></div><div className="quick-tags">{uniqueTags.slice(0, 6).map((tag) => <button key={tag} className="tag-chip" onClick={() => { setTagFilter(tag); setView('journal'); }}>{tag}</button>)}</div></div><div className="insight-note"><Sparkles size={17} /><p>Every page you write is a little more understanding of yourself.</p></div></aside></div></>}
         {['journal', 'favorites', 'archive'].includes(view) && <><div className="page-heading"><div><span className="eyebrow">A PLACE FOR YOUR THOUGHTS</span><h1>{heading}</h1><p className="page-subtitle">{view === 'archive' ? 'A quiet place for entries you’ve tucked away.' : view === 'favorites' ? 'The moments you want to come back to.' : 'Every thought, feeling, and little moment.'}</p></div><button className="btn btn-primary welcome-new" onClick={() => setEditor({})}><Plus size={17} /> New entry</button></div><div className="list-controls"><div className="filter-select-wrap"><Smile size={15} /><select value={moodFilter} onChange={(e) => setMoodFilter(e.target.value)}><option>All moods</option>{MOODS.map((mood) => <option key={mood.name}>{mood.name}</option>)}</select><ChevronDown size={14} /></div><div className="filter-select-wrap"><Clock3 size={15} /><select value={sort} onChange={(e) => setSort(e.target.value)}><option>Newest first</option><option>Oldest first</option></select><ChevronDown size={14} /></div>{selectedDate && <button className="filter-clear" onClick={() => setSelectedDate(null)}>{dateLabel(selectedDate)} <X size={14} /></button>}{tagFilter && <button className="filter-clear" onClick={() => setTagFilter('')}>{tagFilter} <X size={14} /></button>}<span className="results-count">{filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}</span></div><div className="full-entry-list">{filtered.map((entry) => <EntryCard key={entry.id} entry={entry} onOpen={openEntry} onFavorite={toggleFavorite} />)}{filtered.length === 0 && <EmptyState onCreate={() => setEditor({})} message={query ? 'No entries match your search.' : 'Nothing here just yet.'} />}</div></>}
-        {view === 'calendar' && <><div className="page-heading"><div><span className="eyebrow">YOUR DAYS, IN LITTLE MOMENTS</span><h1>Calendar</h1><p className="page-subtitle">See how your days have been unfolding.</p></div><button className="btn btn-primary welcome-new" onClick={() => setEditor({})}><Plus size={17} /> New entry</button></div><div className="calendar-page-grid"><div className="rail-card calendar-main-card"><CalendarWidget entries={activeEntries} large onSelectDate={(date) => { setSelectedDate(date); setView('journal'); }} /><p className="calendar-hint"><span className="calendar-key-dot" /> A little dot means you wrote something that day</p></div><div className="rail-card calendar-day-card"><span className="eyebrow">RECENT MOMENTS</span><h2>Your journal days</h2>{latest.slice(0, 4).map((entry) => <button className="calendar-entry-link" key={entry.id} onClick={() => openEntry(entry)}><span className="calendar-entry-date">{new Date(entry.date).getDate()}<small>{new Date(entry.date).toLocaleDateString('en-US', { month: 'short' })}</small></span><span><b>{entry.title}</b><small>{dateLabel(entry.date)} · {entry.mood}</small></span><ChevronRight size={16} /></button>)}</div></div></>}
+        {view === 'calendar' && <><div className="page-heading"><div><span className="eyebrow">YOUR DAYS, IN LITTLE MOMENTS</span><h1>Calendar</h1><p className="page-subtitle">See how your days have been unfolding.</p></div><button className="btn btn-primary welcome-new" onClick={() => setEditor({})}><Plus size={17} /> New entry</button></div><div className="calendar-page-grid"><div className="rail-card calendar-main-card"><CalendarWidget entries={activeEntries} large onSelectDate={pickCalendarDate} selectedDate={selectedDate} onNewEntry={composeForDate} /><p className="calendar-hint"><span className="calendar-key-dot" /> Each dot is a journal entry — its color shows the mood</p></div><div className="rail-card calendar-day-card"><div className="calendar-day-head"><div><span className="eyebrow">{selectedDate ? 'A DAY TO LOOK BACK ON' : 'RECENT MOMENTS'}</span><h2>{selectedDate ? dateLabel(selectedDate) : 'Your journal days'}</h2></div>{selectedDate && <button className="text-link" onClick={() => setSelectedDate(null)}>All days <X size={13} /></button>}</div>{(() => { const dayEntries = selectedDate ? activeEntries.filter((entry) => dayKey(entry.date) === dayKey(selectedDate)) : latest.slice(0, 6); return dayEntries.length ? dayEntries.map((entry) => <button className="calendar-entry-link" key={entry.id} onClick={() => openEntry(entry)}><span className="calendar-entry-date">{new Date(entry.date).getDate()}<small>{new Date(entry.date).toLocaleDateString('en-US', { month: 'short' })}</small></span><span><b>{entry.title}</b><small>{timeLabel(entry.date)} · {entry.mood}</small></span><ChevronRight size={16} /></button>) : selectedDate ? <div className="calendar-empty-day"><p>Nothing written on this day yet.</p><button className="btn btn-primary" onClick={writeOnSelectedDay}><Plus size={15} /> Write for this day</button></div> : <p className="calendar-empty-day-text">Your recent entries will appear here.</p>; })()}{!selectedDate && <button className="calendar-write-now" onClick={writeOnSelectedDay}><Plus size={15} /> Write today’s entry</button>}</div></div></>}
         {view === 'tags' && <><div className="page-heading"><div><span className="eyebrow">FOLLOW A THREAD</span><h1>Your tags</h1><p className="page-subtitle">Little themes that make your journal yours.</p></div><button className="btn btn-primary welcome-new" onClick={() => setEditor({})}><Plus size={17} /> New entry</button></div><div className="tag-overview-grid">{uniqueTags.map((tag) => { const count = activeEntries.filter((entry) => entry.tags.includes(tag)).length; return <button className="tag-overview-card" key={tag} onClick={() => { setTagFilter(tag); setView('journal'); }}><span className="tag-card-icon"><Tag size={17} /></span><b>{tag}</b><small>{count} {count === 1 ? 'entry' : 'entries'}</small><ArrowRight size={16} /></button>; })}</div></>}
         {view === 'detail' && selected && <><button className="back-link" onClick={() => go('journal')}><ArrowLeft size={16} /> Back to journal</button><article className="detail-card"><div className="detail-cover" style={{ backgroundImage: `url(${selected.image || PHOTO.plant})` }}><button className="detail-back-mobile icon-btn" onClick={() => go('journal')}><ArrowLeft size={17} /></button></div><div className="detail-content"><div className="detail-topline"><span className="eyebrow">A MOMENT IN YOUR JOURNAL</span><div className="detail-actions"><button className="btn btn-outline" onClick={() => setEditor(selected)}>Edit entry</button><button className={`icon-btn ${selected.favorite ? 'is-favorite' : ''}`} aria-label="Toggle favorite" onClick={() => toggleFavorite(selected.id)}><Heart size={18} fill={selected.favorite ? 'currentColor' : 'none'} /></button><button className="icon-btn" aria-label="Archive entry" onClick={async () => { if (await archiveEntry(selected.id)) { notify('Entry moved to your archive.'); go('archive'); } }}><Archive size={18} /></button><button className="icon-btn danger-icon" aria-label="Delete entry" onClick={() => removeEntry(selected.id)}><Trash2 size={17} /></button></div></div><h1>{selected.title}</h1><div className="detail-meta"><span>{dateLabel(selected.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span><span>·</span><span>{timeLabel(selected.date)}</span><MoodPill mood={selected.mood} /></div><div className="detail-divider" /><p className="detail-body">{selected.body}</p><div className="detail-tags">{selected.tags.map((tag) => <button className="tag-chip" key={tag} onClick={() => { setTagFilter(tag); setView('journal'); }}>{tag}</button>)}</div><div className="detail-footer"><Leaf size={16} /><span>Thank you for showing up for yourself today.</span></div></div></article></>}
         {view === 'settings' && <>
@@ -461,7 +525,7 @@ function App() {
       </div><footer className="main-footer"><Brand small /><span>Make space for what matters. <Leaf size={13} /></span></footer></main>
     {profileOpen && <button aria-label="Close profile menu" className="click-catcher" onClick={() => setProfileOpen(false)} />}
     <nav className="mobile-tabbar">{[{ id: 'home', label: 'Home', Icon: Home }, { id: 'journal', label: 'Journal', Icon: BookOpen }, { id: 'calendar', label: 'Calendar', Icon: CalendarDays }, { id: 'favorites', label: 'Favorites', Icon: Heart }].map(({ id, label, Icon }) => <button key={id} onClick={() => go(id)} className={view === id ? 'active' : ''}><Icon size={19} /><span>{label}</span></button>)}<button className="mobile-tab-new" onClick={() => setEditor({})}><span><Plus size={19} /></span><span>Write</span></button></nav>
-    {editor && <EntryEditor entry={editor.id ? editor : null} onClose={() => setEditor(null)} onSave={saveEntry} />}{toast && <div className="toast"><span><Check size={16} /></span>{toast}</div>}
+    {editor && <EntryEditor entry={editor} onClose={() => setEditor(null)} onSave={saveEntry} />}{toast && <div className="toast"><span><Check size={16} /></span>{toast}</div>}
   </div>;
 }
 

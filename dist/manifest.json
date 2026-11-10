@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "Luma Journal",
+  "short_name": "Luma",
+  "description": "A calmer space to write, reflect, and grow.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f0",
+  "theme_color": "#f5f6f0",
+  "icons": [
+    {
+      "src": "/icons/luma-journal-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/luma-journal-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
